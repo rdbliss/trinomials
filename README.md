@@ -106,6 +106,11 @@ The output means that the largest cliques in the 5th graph have size 5. There
 are three cliques which achieve this, one of which is symmetric. The largest
 maximal skew clique has size 4, and five such cliques attain that value.
 
+## Outputs
+
+The script has been precomputed for `n` up to 2500 or so. The results are saved
+in tar and zip files in the `results` directory.
+
 ## Parallelism
 
 The script runs in parallel, using as many CPU's as you have locally. This can
