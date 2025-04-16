@@ -1,0 +1,4 @@
+networkx==3.4.2
+pynauty==2.8.8.1
+python-flint @ git+https://github.com/flintlib/python-flint.git@117065e51d78e54050ff3a39a37912b0a2cb8e34
+tqdm==4.67.1
