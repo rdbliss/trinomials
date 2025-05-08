@@ -37,7 +37,15 @@ def search(maxcoeff, setsize, n, extraCheck=None):
 
     return real_goods
 
+def dres(n, i, j):
+    p = pointToPoly(n, 1, i)
+    q = pointToPoly(n, 1, j)
+    return areScalableRes(p, q)
+
 def isDyadic(x):
+    if x == 0:
+        return False
+
     while x & 1 == 0:
         x >>= 1
 

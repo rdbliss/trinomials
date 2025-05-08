@@ -3,38 +3,48 @@
 import multiprocessing as mp
 import networkx as nx
 import itertools
-from search import pointToPoly, areScalable, areScalableRes, areRelPrime, areBinaryScalable, dyadicCofactors
+from search import pointToPoly, areScalable, areScalableRes, areRelPrime, areBinaryScalable, dyadicCofactors, isDyadic, dres
 from math import factorial, log2, floor
 from tqdm import tqdm
 from functools import cache
+from collections import deque
 import pynauty
 import sys
 
-def mp_scalable(args):
-    n, logfloor, i, j = args
-
-    v = min(ord2(i - j), logfloor)
+def pow2_indepdence_check(n, i, j):
+    v = ord2(i - j)
     if v > 0:
         power = pow(2, v)
         if i % power not in {n % power, 0}:
-            return i, j, False
+            return False
+
+    return True
+
+def count_resultants(n):
+    """
+    count the number of resultants computed by the naive "check every pair"
+    approach after excluding our power of 2 independent sets.
+    """
+    check = pow2_indepdence_check
+    return sum(check(i, j) for i, j in itertools.combinations(range(1, n), 2))
+
+def mp_scalable(args):
+    n, i, j = args
+
+    if not pow2_indepdence_check(n, i, j):
+        return i, j, False
 
     p = pointToPoly(n, 1, i)
     q = pointToPoly(n, 1, j)
     return i, j, areScalable(p, q)
 
 def mp_resultant(args):
-    n, logfloor, i, j = args
+    n, i, j = args
 
-    v = min(ord2(i - j), logfloor)
-    if v > 0:
-        power = pow(2, v)
-        if i % power not in {n % power, 0}:
-            return i, j, False
+    if not pow2_indepdence_check(n, i, j):
+        return i, j, False
 
-    p = pointToPoly(n, 1, i)
-    q = pointToPoly(n, 1, j)
-    return i, j, areScalableRes(p, q)
+    return i, j, dres(n, i, j)
 
 def mp_binscal(args):
     n, i, j = args
@@ -65,21 +75,42 @@ def ord2(n):
 
     return k
 
-def makeGraph(n, cond="resultant"):
+def mp_congruence_visit(args):
+    n, i = args
+    visit = set(range(1, n-i))
+
+    ret_edges = deque()
+    resultant_count = 0
+    while visit:
+        d = min(visit)
+        resultant_count += 1
+        if not dres(n, i, i + d):
+            visit -= set(range(d, n-i, d))
+        else:
+            edges = ((k, k + d) for k in range(i, n-d, d))
+            ret_edges.extend(edges)
+            visit -= {d}
+
+    return ret_edges, resultant_count
+
+def makeGraph(n, cond="congruence"):
     G = nx.Graph()
-    G.add_nodes_from(range(1, n))
-    pairs = itertools.combinations(range(1, n), 2)
-    points = ((n, i, j) for i, j in pairs)
 
     match cond:
+        case "congruence":
+            resultant_count = 0
+            with mp.Pool() as p:
+                points = ((n, i) for i in range(1, n))
+                rets = p.imap_unordered(mp_congruence_visit, points)
+                for edges, count in tqdm(rets, total=n-1):
+                    resultant_count += count
+                    G.add_edges_from(edges)
+
+                return G
         case "scalable":
             check = mp_scalable
-            # the scalable check now has a shortcut if we know floor(log2(n)),
-            # so pass that to its function.
-            points = ((n, floor(log2(n)), i, j) for n, i, j in points)
         case "resultant":
             check = mp_resultant
-            points = ((n, floor(log2(n)), i, j) for n, i, j in points)
         case "relprime":
             check = mp_relprime
         case "dyadic":
@@ -87,8 +118,10 @@ def makeGraph(n, cond="resultant"):
         case "binary scalable":
             check = mp_binscal
         case _:
-            raise ValueError("cond must be one of: 'scalable', 'resultant', 'relprime', 'dyadic', 'binary scalable'")
+            raise ValueError("cond must be one of: 'congruence', 'scalable', 'resultant', 'relprime', 'dyadic', 'binary scalable'")
 
+    pairs = itertools.combinations(range(1, n), 2)
+    points = ((n, i, j) for i, j in pairs)
     with mp.Pool() as p:
         total = binomial(n-1, 2)
         res = p.imap_unordered(check, points, chunksize=max(1, total//1000))
