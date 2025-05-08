@@ -157,6 +157,7 @@ def largestCliqueSize(n):
     return len(largestClique(n))
 
 def drawColors(n):
+    import matplotlib.colors as mpc
     G = makeGraph(n)
     colors = nx.coloring.greedy_color(G, "independent_set")
     unique_colors = set(colors.values())
@@ -180,9 +181,42 @@ def graphColors(n):
 
     return inv_colors
 
+def makePercentPlot(n):
+    import matplotlib.pyplot as plt
+    res = [len(makeGraph(k, cond="resultant").edges) / binomial(k-1, 2) for k in range(3, n)]
+    relprime = [len(makeGraph(k, cond="relprime").edges) / binomial(k-1, 2) for k in range(3, n)]
+
+    plt.figure(figsize=(2 * 4, 2 * 3))
+    plt.style.use("ggplot")
+    plt.plot(range(3, n), res, lw=3, label="dyadically resolving")
+    plt.plot(range(3, n), relprime, lw=3, label="relatively prime")
+    plt.title("Percent of dyadically resolving trinomial pairs")
+    plt.xlabel("n")
+    plt.legend()
+
 @cache
 def nColors(n):
     return len(graphColors(n))
+
+def makeAdjPlot(n):
+    import matplotlib.pyplot as plt
+    G = makeGraph(n)
+    m = nx.adjacency_matrix(G).toarray()
+    plt.imshow(m)
+
+def makeDAdjPlot(d):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from flint import fmpq_poly
+
+    plt.figure()
+    x = fmpq_poly([0, 1])
+    g = x**d - 1
+    def ent(n, i):
+        f = x**(n + 1) - x**(i + 1) + 1
+        return int(isDyadic(int(abs(f.resultant(g)))))
+    m = np.fromfunction(np.vectorize(ent), (d-1, d-1))
+    plt.imshow(m)
 
 if __name__ == "__main__":
     try:
