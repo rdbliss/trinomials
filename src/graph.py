@@ -1,99 +1,31 @@
 #!/usr/bin/env python3
 
-import multiprocessing as mp
-import networkx as nx
+"""
+graph.py - construct trinomial graphs
+
+This file contains the main graph creation functions, including the parallel
+processing boilerplate.
+"""
+
+import sys
 import itertools
-from search import pointToPoly, areScalable, areScalableRes, areRelPrime, areBinaryScalable, dyadicCofactors, isDyadic, dres
-from math import factorial, log2, floor
-from tqdm import tqdm
+import multiprocessing as mp
+from math import comb as binomial
 from functools import cache
 from collections import deque
+
+import networkx as nx
+from utils import trinom, dres, are_scalable
+from tqdm import tqdm
 import pynauty
-import sys
 
-def pow2_indepdence_check(n, i, j):
-    v = ord2(i - j)
-    if v > 0:
-        power = pow(2, v)
-        if i % power not in {n % power, 0}:
-            return False
 
-    return True
-
-def count_resultants(n):
+def make_graph(n, cond="congruence"):
     """
-    count the number of resultants computed by the naive "check every pair"
-    approach after excluding our power of 2 independent sets.
+    make the trinomial graph on {1, 2, ..., n - 1}, which has the edge {i, j}
+    if and only if the resultant of x^n - x^i + 1 and x^n - x^j + 1 is +-a
+    power of 2.
     """
-    check = pow2_indepdence_check
-    return sum(check(i, j) for i, j in itertools.combinations(range(1, n), 2))
-
-def mp_scalable(args):
-    n, i, j = args
-
-    if not pow2_indepdence_check(n, i, j):
-        return i, j, False
-
-    p = pointToPoly(n, 1, i)
-    q = pointToPoly(n, 1, j)
-    return i, j, areScalable(p, q)
-
-def mp_resultant(args):
-    n, i, j = args
-
-    if not pow2_indepdence_check(n, i, j):
-        return i, j, False
-
-    return i, j, dres(n, i, j)
-
-def mp_binscal(args):
-    n, i, j = args
-    p = pointToPoly(n, 1, i)
-    q = pointToPoly(n, 1, j)
-    return i, j, areBinaryScalable(p, q)
-
-def mp_relprime(args):
-    n, i, j = args
-    p = pointToPoly(n, 1, i)
-    q = pointToPoly(n, 1, j)
-    return i, j, areRelPrime(p, q)
-
-def mp_dyadic(args):
-    n, i, j = args
-    p = pointToPoly(n, 1, i)
-    q = pointToPoly(n, 1, j)
-    return i, j, dyadicCofactors(p, q)
-
-def binomial(n, k):
-    return (factorial(n) // factorial(k)) // factorial(n - k)
-
-def ord2(n):
-    k = 0
-    while n & 1 == 0:
-        k += 1
-        n >>= 1
-
-    return k
-
-def mp_congruence_visit(args):
-    n, i = args
-    visit = set(range(1, n-i))
-
-    ret_edges = deque()
-    resultant_count = 0
-    while visit:
-        d = min(visit)
-        resultant_count += 1
-        if not dres(n, i, i + d):
-            visit -= set(range(d, n-i, d))
-        else:
-            edges = ((k, k + d) for k in range(i, n-d, d))
-            ret_edges.extend(edges)
-            visit -= {d}
-
-    return ret_edges, resultant_count
-
-def makeGraph(n, cond="congruence"):
     G = nx.Graph()
 
     match cond:
@@ -102,7 +34,7 @@ def makeGraph(n, cond="congruence"):
             with mp.Pool() as p:
                 points = ((n, i) for i in range(1, n))
                 rets = p.imap_unordered(mp_congruence_visit, points)
-                for edges, count in tqdm(rets, total=n-1):
+                for edges, count in tqdm(rets, total=n - 1):
                     resultant_count += count
                     G.add_edges_from(edges)
 
@@ -113,64 +45,125 @@ def makeGraph(n, cond="congruence"):
             check = mp_resultant
         case "relprime":
             check = mp_relprime
-        case "dyadic":
-            check = mp_dyadic
-        case "binary scalable":
-            check = mp_binscal
         case _:
-            raise ValueError("cond must be one of: 'congruence', 'scalable', 'resultant', 'relprime', 'dyadic', 'binary scalable'")
+            raise ValueError(
+                "cond must be one of: 'congruence', 'scalable', "
+                "'resultant', 'relprime'"
+            )
 
     pairs = itertools.combinations(range(1, n), 2)
     points = ((n, i, j) for i, j in pairs)
     with mp.Pool() as p:
-        total = binomial(n-1, 2)
-        res = p.imap_unordered(check, points, chunksize=max(1, total//1000))
-        res = tqdm(res, total=binomial(n-1, 2))
+        total = binomial(n - 1, 2)
+        res = p.imap_unordered(check, points, chunksize=max(1, total // 1000))
+        res = tqdm(res, total=binomial(n - 1, 2))
         edges = ((i, j) for i, j, scalable in res if scalable)
         G.add_edges_from(edges)
 
     return G
 
-def makeGraphNauty(n):
-    G = makeGraph(n)
-    N = pynauty.Graph(n-1)
+
+def pow2_indepdence_check(n, i, j):
+    v = ord2(i - j)
+    if v > 0:
+        power = pow(2, v)
+        if i % power not in {n % power, 0}:
+            return False
+
+    return True
+
+
+def count_resultants(n):
+    """
+    count the number of resultants computed by the naive "check every pair"
+    approach after excluding our power of 2 independent sets.
+    """
+    check = pow2_indepdence_check
+    pairs = itertools.combinations(range(1, n), 2)
+    return sum(check(n, i, j) for i, j in pairs)
+
+
+def mp_scalable(args):
+    n, i, j = args
+
+    if not pow2_indepdence_check(n, i, j):
+        return i, j, False
+
+    return i, j, are_scalable(*args)
+
+
+def mp_resultant(args):
+    n, i, j = args
+
+    if not pow2_indepdence_check(n, i, j):
+        return i, j, False
+
+    return i, j, dres(*args)
+
+
+def mp_relprime(args):
+    n, i, j = args
+    p = trinom(n, i)
+    q = trinom(n, j)
+    return i, j, p.gcd(q) == 1
+
+
+def mp_congruence_visit(args):
+    n, i = args
+    visit = set(range(1, n - i))
+
+    ret_edges = deque()
+    resultant_count = 0
+    while visit:
+        d = min(visit)
+        resultant_count += 1
+        if not dres(n, i, i + d):
+            visit -= set(range(d, n - i, d))
+        else:
+            edges = ((k, k + d) for k in range(i, n - d, d))
+            ret_edges.extend(edges)
+            visit -= {d}
+
+    return ret_edges, resultant_count
+
+
+def make_graph_nauty(n):
+    G = make_graph(n)
+    N = pynauty.Graph(n - 1)
 
     for k in range(1, n):
-        N.connect_vertex(k-1, [v-1 for v in G[k].keys()])
+        N.connect_vertex(k - 1, [v - 1 for v in G[k].keys()])
 
     return N
 
-def largestClique(n, minimize=False):
+
+def ord2(n):
+    k = 0
+    while n & 1 == 0:
+        k += 1
+        n >>= 1
+
+    return k
+
+
+def largestClique(n):
     """
     find the cliques of largest size in the graph S(n).
     if minimize is true, then choose the clique with the fewest average number
     of terms in the bezout cofactors.
     """
-    G = makeGraph(n)
+    G = make_graph(n)
     cliques = nx.clique.find_cliques(G)
 
-    if minimize:
-        def weight(clique):
-            avg = 0
-            for i, j in itertools.combinations(clique, 2):
-                p = pointToPoly(n, 1, i)
-                q = pointToPoly(n, 1, j)
-                g, r, s = p.xgcd(q)
-                avg -= sum(r.coeffs()) / len(r.coeffs())
+    return max(cliques, key=len)
 
-            return avg / binomial(len(clique), 2)
-
-        key = weight
-    else:
-        key = len
-
-    return max(cliques, key=key)
 
 def largestCliques(n):
-    G = makeGraph(n)
+    G = make_graph(n)
     cs = nx.clique.find_cliques(G)
     size = largestCliqueSize(n)
     return [sorted(c) for c in cs if len(c) == size]
+
 
 def largestMidCliques(n):
     """
@@ -180,78 +173,35 @@ def largestMidCliques(n):
     if n % 2 != 0:
         raise ValueError("need even n for a mid clique")
 
-    G = makeGraph(n)
+    G = make_graph(n)
     cs = list(nx.clique.find_cliques(G))
     max_size = max(map(len, cs))
     return [c for c in cs if len(c) == max_size and n // 2 in c]
+
 
 @cache
 def largestCliqueSize(n):
     return len(largestClique(n))
 
-def drawColors(n):
-    import matplotlib.colors as mpc
-    G = makeGraph(n)
-    colors = nx.coloring.greedy_color(G, "independent_set")
-    unique_colors = set(colors.values())
-    graph_color_to_mpl_color = dict(zip(unique_colors, mpc.TABLEAU_COLORS))
-    node_colors = [graph_color_to_mpl_color[colors[n]] for n in G.nodes()]
-
-    pos = nx.shell_layout(G)
-    nx.draw(
-        G,
-        pos,
-        with_labels=True,
-        node_color=node_colors,
-        font_color="#333333",
-    )
 
 def graphColors(n):
-    G = makeGraph(n)
+    G = make_graph(n)
     colors = nx.coloring.greedy_color(G, "independent_set")
     # this is horredenously inefficient
-    inv_colors = {color: sorted([v for v, c in colors.items() if c == color]) for color in set(colors.values())}
+    inv_colors = {
+        color: sorted([v for v, c in colors.items() if c == color])
+        for color in set(colors.values())
+    }
 
     return inv_colors
 
-def makePercentPlot(n):
-    import matplotlib.pyplot as plt
-    res = [len(makeGraph(k, cond="resultant").edges) / binomial(k-1, 2) for k in range(3, n)]
-    relprime = [len(makeGraph(k, cond="relprime").edges) / binomial(k-1, 2) for k in range(3, n)]
-
-    plt.figure(figsize=(2 * 4, 2 * 3))
-    plt.style.use("ggplot")
-    plt.plot(range(3, n), res, lw=3, label="dyadically resolving")
-    plt.plot(range(3, n), relprime, lw=3, label="relatively prime")
-    plt.title("Percent of dyadically resolving trinomial pairs")
-    plt.xlabel("n")
-    plt.legend()
 
 @cache
 def nColors(n):
     return len(graphColors(n))
 
-def makeAdjPlot(n):
-    import matplotlib.pyplot as plt
-    G = makeGraph(n)
-    m = nx.adjacency_matrix(G).toarray()
-    plt.imshow(m)
 
-def makeDAdjPlot(d):
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from flint import fmpq_poly
-
-    plt.figure()
-    x = fmpq_poly([0, 1])
-    g = x**d - 1
-    def ent(n, i):
-        f = x**(n + 1) - x**(i + 1) + 1
-        return int(isDyadic(int(abs(f.resultant(g)))))
-    m = np.fromfunction(np.vectorize(ent), (d-1, d-1))
-    plt.imshow(m)
-
-if __name__ == "__main__":
+def main(argv):
     try:
         n = int(sys.argv[1])
     except:
@@ -262,7 +212,7 @@ if __name__ == "__main__":
         print("n must be >= 3")
         sys.exit(1)
 
-    G = makeGraph(n, cond="resultant")
+    G = make_graph(n)
     cs = list(nx.clique.find_cliques(G))
     cs = [sorted(c) for c in cs]
 
@@ -280,7 +230,7 @@ if __name__ == "__main__":
         return set(L) == set(n - x for x in L)
 
     max_centered, max_centered_size = get_largest(is_centered)
-    max_half, max_half_size = get_largest(lambda L: all(x <= n//2 for x in L))
+    max_half, max_half_size = get_largest(lambda L: all(x <= n // 2 for x in L))
 
     print("# clique number, maximal symmetric clique, maximal clique <= n/2")
     print(f"{max_size}, {max_centered_size}, {max_half_size}")
@@ -304,3 +254,7 @@ if __name__ == "__main__":
     print("-----------")
     for c in max_half:
         print(c)
+
+
+if __name__ == "__main__":
+    main(sys.argv)
